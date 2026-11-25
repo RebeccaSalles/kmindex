@@ -310,6 +310,13 @@ namespace kmq {
     if (!o->single.empty())
       spdlog::warn("--single-query: all query results are kept in memory");
 
+    // per-position output needs every row: streaming off for this query
+    if (stream_chunk() > 0 && (o->format == format::json_with_positions || o->format == format::jsonl_with_positions))
+    {
+      spdlog::warn("KMINDEX_STREAM ignored: per-position output needs the full row matrix");
+      stream_disabled() = true;
+    }
+
     for (auto& index_name : o->index_names)
     {
       Timer timer;
