@@ -33,6 +33,17 @@ namespace kmq {
     std::memcpy(dest, m_mapped.begin() + (m_bytes * pos) + 49, m_bytes);
   }
 
+  // MADV_WILLNEED on the row's pages, in 1 MiB pieces (one request is capped by the device's
+  // largest transfer); only this mapping of this file is affected
+  void partition::prefetch(std::uint64_t pos)
+  {
+    const std::size_t page = static_cast<std::size_t>(sysconf(_SC_PAGESIZE)), piece = 1UL << 20;
+    const std::size_t off = (m_bytes * pos) + 49, end = std::min(off + m_bytes, m_mapped.length());
+    char* base = const_cast<char*>(m_mapped.data());
+    for (std::size_t c = off / page * page; c < end; c += piece)
+      posix_madvise(base + c, std::min(piece, end - c), POSIX_MADV_WILLNEED);
+  }
+
 #ifdef KMINDEX_WITH_COMPRESSION
   compressed_partition::compressed_partition(const std::string& matrix_path, const std::string& config_path, std::size_t nb_samples, std::size_t width)
     : m_nb_samples(nb_samples), m_bytes(((nb_samples * width) + 7) / 8)
