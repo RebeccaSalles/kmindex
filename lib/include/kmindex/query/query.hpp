@@ -2,6 +2,8 @@
 #define QUERY_HPP_HIJEZMAU
 
 #include <cstdint>
+#include <cstdlib>
+#include <vector>
 #include <atomic>
 #include <string_view>
 #include <cassert>
@@ -17,6 +19,23 @@
 
 namespace kmq {
 
+  // KMINDEX_STREAM=C (C > 0): the rows of a query are read in query order, C k-mers at a time, into a
+  // ring of C + z rows, and the per-sample counters are updated as they arrive, so the K x row matrix
+  // of a group is never held. Presence/absence indexes only (width 1), uncompressed, no per-position
+  // output. Unset or 0 = original code.
+  // set by the query command when the output needs per-position results (the row matrix)
+  inline std::atomic<bool>& stream_disabled()
+  {
+    static std::atomic<bool> d{false};
+    return d;
+  }
+
+  inline std::size_t stream_chunk()
+  {
+    static const std::size_t c = [] { const char* e = std::getenv("KMINDEX_STREAM"); return e ? std::strtoul(e, nullptr, 10) : 0UL; }();
+    return stream_disabled() ? 0UL : c;
+  }
+
   class query_response
   {
     public:
@@ -29,10 +48,18 @@ namespace kmq {
       std::uint8_t* get(std::size_t mer_pos);
       void free();
 
+      // counters computed while streaming (no row matrix allocated)
+      bool streamed() const { return m_streamed; }
+      void set_counts(std::vector<std::uint32_t>&& c) { m_counts = std::move(c); }
+      std::vector<std::uint32_t>&& take_counts() { return std::move(m_counts); }
+
     private:
       std::string m_name;
       std::vector<std::uint8_t> m_responses;
       std::size_t m_block_size {0};
+      std::size_t m_n {0};
+      bool m_streamed {false};
+      std::vector<std::uint32_t> m_counts;
   };
 
   using query_response_t = std::unique_ptr<query_response>;
@@ -93,6 +120,8 @@ namespace kmq {
       {
         return m_responses;
       }
+
+      std::size_t z() const { return m_z_size; }
 
       auto begin()
       {

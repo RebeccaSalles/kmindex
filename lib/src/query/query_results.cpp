@@ -7,6 +7,7 @@
 #include <nonstd/span.hpp>
 
 #include <iostream>
+#include <stdexcept>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -35,10 +36,22 @@ namespace kmq {
     : m_qr(std::move(qr)), m_z(z), m_infos(infos), m_nbk(m_qr->nbk() - z)
   {
     m_ratios.resize(m_infos.nb_samples(), 0);
-    m_counts.resize(m_infos.nb_samples(), 0);
+    if (!m_qr->streamed())   // streamed counters are moved in below, not allocated twice
+      m_counts.resize(m_infos.nb_samples(), 0);
 
     if (pos)
       m_positions.resize(m_infos.nb_samples());
+
+    if (m_qr->streamed())  // counters were updated while the rows streamed in
+    {
+      if (pos)
+        throw std::runtime_error("KMINDEX_STREAM does not support per-position output");
+      m_counts = m_qr->take_counts();
+      for (std::size_t i = 0; i < m_ratios.size(); ++i)
+        m_ratios[i] = m_counts[i] / static_cast<double>(m_nbk);
+      m_qr->free();
+      return;
+    }
 
     if (m_infos.bw() > 1)
     {
