@@ -15,14 +15,24 @@
 #endif
 
 #include <iostream>
+#include <cstdlib>
 
 namespace kmq {
+
+  // KMINDEX_PREFETCH=D: while row k of a partition is copied, ask the kernel for row k + D
+  // (unset or 0 = original behaviour, no extra calls)
+  inline std::size_t prefetch_depth()
+  {
+    static const std::size_t d = [] { const char* e = std::getenv("KMINDEX_PREFETCH"); return e ? std::strtoul(e, nullptr, 10) : 0UL; }();
+    return d;
+  }
 
   class partition_interface
   {
     public:
       virtual ~partition_interface() = default;
       virtual void query(std::uint64_t pos, std::uint8_t* dest) = 0;
+      virtual void prefetch(std::uint64_t pos) { (void)pos; }
   };
 
   class partition : public partition_interface
@@ -33,6 +43,7 @@ namespace kmq {
       ~partition();
 
       virtual void query(std::uint64_t pos, std::uint8_t* dest);
+      virtual void prefetch(std::uint64_t pos);
 
     private:
       int m_fd {0};
@@ -97,9 +108,23 @@ namespace kmq {
 
         std::unique_lock<spinlock> lock(m_mutexes[p]);
         init(p);
-        for (auto& [mer, qid] : smers)
+        const std::size_t D = prefetch_depth();
+        if (!D)
         {
-          m_partitions[p]->query(mer.h, responses[qid]->get(mer.i));
+          for (auto& [mer, qid] : smers)
+          {
+            m_partitions[p]->query(mer.h, responses[qid]->get(mer.i));
+          }
+          m_partitions[p] = nullptr;
+          return;
+        }
+        // rows are requested D ahead of the one being copied
+        const std::size_t n = smers.size();
+        for (std::size_t t = 0; t < D && t < n; ++t) m_partitions[p]->prefetch(smers[t].first.h);
+        for (std::size_t k = 0; k < n; ++k)
+        {
+          if (k + D < n) m_partitions[p]->prefetch(smers[k + D].first.h);
+          m_partitions[p]->query(smers[k].first.h, responses[smers[k].second]->get(smers[k].first.i));
         }
         m_partitions[p] = nullptr;
       }
