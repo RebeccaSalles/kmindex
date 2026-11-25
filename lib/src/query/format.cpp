@@ -232,6 +232,16 @@ namespace kmq {
     m_json[infos.name()][response.name()] = json({});
 
     auto& j = m_json[infos.name()][response.name()];
+    if (kmindex_lean())   // same entries, same order of visit, ratio computed per sample
+    {
+      for (std::size_t i = 0; i < infos.nb_samples(); ++i)
+      {
+        const double v = response.ratio(i);
+        if (v >= this->m_threshold)
+          j[infos.samples()[i]] = v;
+      }
+      return;
+    }
     for (std::size_t i = 0; i < infos.nb_samples(); ++i)
     {
       if (response.ratios()[i] >= this->m_threshold)

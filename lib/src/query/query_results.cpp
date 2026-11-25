@@ -35,7 +35,10 @@ namespace kmq {
   query_result::query_result(query_response_t&& qr, std::size_t z, const index_infos& infos, bool pos)
     : m_qr(std::move(qr)), m_z(z), m_infos(infos), m_nbk(m_qr->nbk() - z)
   {
-    m_ratios.resize(m_infos.nb_samples(), 0);
+    // KMINDEX_LEAN=1, presence/absence without positions: ratios are computed when written
+    const bool no_ratio_array = kmindex_lean() && m_infos.bw() == 1 && !pos;
+    if (!no_ratio_array)
+      m_ratios.resize(m_infos.nb_samples(), 0);
     if (!m_qr->streamed())   // streamed counters are moved in below, not allocated twice
       m_counts.resize(m_infos.nb_samples(), 0);
 
@@ -47,7 +50,7 @@ namespace kmq {
       if (pos)
         throw std::runtime_error("KMINDEX_STREAM does not support per-position output");
       m_counts = m_qr->take_counts();
-      for (std::size_t i = 0; i < m_ratios.size(); ++i)
+      for (std::size_t i = 0; i < m_ratios.size(); ++i)   // empty in lean mode
         m_ratios[i] = m_counts[i] / static_cast<double>(m_nbk);
       m_qr->free();
       return;
@@ -103,7 +106,7 @@ namespace kmq {
       for (std::size_t k = 0; k < T; ++k) th.emplace_back(work, words * k / T, words * (k + 1) / T);
       for (auto& x : th) x.join();
     }
-    for (std::size_t i = 0; i < N; ++i)
+    for (std::size_t i = 0; i < m_ratios.size(); ++i)   // empty in lean mode (was i < N)
       m_ratios[i] = m_counts[i] / static_cast<double>(m_nbk);
     m_qr->free();
   }
@@ -114,7 +117,7 @@ namespace kmq {
     const uint8_t* data = m_qr->get(0);
 
     std::vector<uint8_t> kres(m_qr->block_size(), 255);
-    std::vector<std::uint32_t> count(m_ratios.size(), 0);
+    std::vector<std::uint32_t> count(m_counts.size(), 0);
 
     std::size_t block_size = m_qr->block_size();
     std::size_t block_size_z = m_qr->block_size() * m_z;
@@ -129,7 +132,7 @@ namespace kmq {
         }
       }
 
-      for (std::size_t s = 0; s < m_ratios.size(); ++s)
+      for (std::size_t s = 0; s < m_counts.size(); ++s)   // was m_ratios.size(), equal
       {
         m_counts[s] += static_cast<bool>(BITCHECK(kres, s));
       }
@@ -283,6 +286,12 @@ namespace kmq {
 
   const std::vector<double>& query_result::ratios() const
   {
+    if (m_ratios.empty() && !m_counts.empty())   // a formatter that needs the array gets it
+    {
+      m_ratios.resize(m_counts.size());
+      for (std::size_t i = 0; i < m_counts.size(); ++i)
+        m_ratios[i] = m_counts[i] / static_cast<double>(m_nbk);
+    }
     return m_ratios;
   }
 

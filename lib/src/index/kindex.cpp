@@ -69,7 +69,7 @@ namespace kmq {
   kindex::kindex() {}
 
   kindex::kindex(const index_infos& i, bool cache)
-    : m_infos(i), m_mutexes(i.nb_partitions()), m_cache(cache)
+    : m_infos(kmindex_lean() ? index_infos::without_samples(i) : i), m_mutexes(i.nb_partitions()), m_cache(cache)
   {
     if (i.is_compressed_index())
     {
