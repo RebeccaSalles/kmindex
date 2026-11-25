@@ -32,6 +32,8 @@ namespace kmq {
       const std::vector<std::uint32_t>& counts() const;
 
       const std::vector<double>& ratios() const;
+      // ratio of one sample: from the array if present, else count / k-mers (same double)
+      double ratio(std::size_t i) const { return m_ratios.empty() ? m_counts[i] / static_cast<double>(m_nbk) : m_ratios[i]; }
 
       const std::vector<std::vector<std::uint8_t>>& positions() const;
 
@@ -40,7 +42,7 @@ namespace kmq {
       double threshold() const;
 
     private:
-      std::vector<double> m_ratios;
+      mutable std::vector<double> m_ratios;
       std::vector<std::uint32_t> m_counts;
       std::vector<std::vector<std::uint8_t>> m_positions;
       query_response_t m_qr;

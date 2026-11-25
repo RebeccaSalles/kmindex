@@ -16,10 +16,20 @@
 #include <nlohmann/json.hpp>
 #include <semver.hpp>
 #include <simdjson.h>
+#include <cstdlib>
 
 using json = nlohmann::json;
 
 namespace kmq {
+
+  // KMINDEX_LEAN=1: one copy of the sample names per query (no per-query copy of the index
+  // description, kindex keeps it without the names) and no per-sample ratio array (ratio =
+  // count / k-mers computed when written, same double).
+  inline bool kmindex_lean()
+  {
+    static const bool f = [] { const char* e = std::getenv("KMINDEX_LEAN"); return e && e[0] == '1'; }();
+    return f;
+  }
 
   enum class register_mode {
     symlink,
@@ -60,6 +70,8 @@ namespace kmq {
       index_infos(const std::string& name, const std::string& km_dir, register_mode rm = register_mode::symlink);
       index_infos(const std::string& name, const json& jdata);
       index_infos(const std::string& name, simdjson::ondemand::value jdata, std::string_view path);
+      // copy of everything except the sample names
+      static index_infos without_samples(const index_infos& o);
 
       std::shared_ptr<km::HashWindow> get_hash_w() const;
       std::shared_ptr<km::Repartition> get_repartition() const;

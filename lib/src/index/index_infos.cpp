@@ -203,6 +203,17 @@ namespace kmq {
     return m_samples;
   }
 
+  index_infos index_infos::without_samples(const index_infos& o)
+  {
+    index_infos r;
+    r.m_name = o.m_name; r.m_path = o.m_path; r.m_nb_partitions = o.m_nb_partitions;
+    r.m_bloom_size = o.m_bloom_size; r.m_nb_samples = o.m_nb_samples; r.m_smer_size = o.m_smer_size;
+    r.m_minim_size = o.m_minim_size; r.m_index_size = o.m_index_size; r.m_bw = o.m_bw;
+    r.m_sha1 = o.m_sha1; r.m_hashw = o.m_hashw; r.m_repart = o.m_repart;
+    r.m_kmver = o.m_kmver; r.m_kmtver = o.m_kmtver; r.m_is_compressed = o.m_is_compressed; r.m_rmode = o.m_rmode;
+    return r;   // names deliberately absent: kindex never uses them
+  }
+
   const semver::version& index_infos::km_version() const
   {
     return m_kmver;

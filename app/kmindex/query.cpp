@@ -2,6 +2,7 @@
 #include "query.hpp"
 
 #include <iostream>
+#include <optional>
 #include <kmindex/query/query.hpp>
 #include <kmindex/index/index.hpp>
 #include <kmindex/query/format.hpp>
@@ -320,7 +321,11 @@ namespace kmq {
     for (auto& index_name : o->index_names)
     {
       Timer timer;
-      auto infos = global.get(index_name);
+      // KMINDEX_LEAN=1: work on the registry's own entry instead of a full copy
+      // (the copy duplicated every sample name; the entry is only used for this group's query)
+      std::optional<index_infos> infos_copy;
+      if (!kmindex_lean()) infos_copy.emplace(global.get(index_name));
+      index_infos& infos = kmindex_lean() ? global.get(index_name) : *infos_copy;
 
       if (o->uncompressed)
       {
