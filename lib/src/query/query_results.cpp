@@ -7,8 +7,29 @@
 #include <nonstd/span.hpp>
 
 #include <iostream>
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+#include <thread>
+#include <vector>
 
 namespace kmq {
+
+  // KMINDEX_FASTCOUNT=1: count per-sample hits by ANDing the z+1 rows 64 samples (one 64-bit word) at a time
+  // and visiting only the set bits of the result,
+  // KMINDEX_COUNT_THREADS=n: split the samples into n ranges, one thread each.
+  // Unset = original loop.
+  static bool fast_count()
+  {
+    static const bool f = [] { const char* e = std::getenv("KMINDEX_FASTCOUNT"); return e && e[0] == '1'; }();
+    return f;
+  }
+
+  static std::size_t count_threads()
+  {
+    static const std::size_t t = [] { const char* e = std::getenv("KMINDEX_COUNT_THREADS"); std::size_t v = e ? std::strtoul(e, nullptr, 10) : 1UL; return v ? v : 1UL; }();
+    return t;
+  }
 
   query_result::query_result(query_response_t&& qr, std::size_t z, const index_infos& infos, bool pos)
     : m_qr(std::move(qr)), m_z(z), m_infos(infos), m_nbk(m_qr->nbk() - z)
@@ -35,8 +56,48 @@ namespace kmq {
     }
   }
 
+  void query_result::compute_ratios_fast()
+  {
+    const std::uint8_t* data = m_qr->get(0);
+    const std::size_t bs = m_qr->block_size(), words = (bs + 7) / 8, N = m_counts.size(), nbk = m_nbk, z = m_z;
+    std::uint32_t* counts = m_counts.data();
+    auto work = [=](std::size_t w0, std::size_t w1) {
+      for (std::size_t i = 0; i < nbk; ++i)
+      {
+        const std::uint8_t* row = data + i * bs;
+        for (std::size_t w = w0; w < w1; ++w)
+        {
+          const std::size_t off = w * 8, n = std::min<std::size_t>(8, bs - off);
+          std::uint64_t acc = ~0ULL;
+          for (std::size_t r = 0; r <= z; ++r)
+          {
+            std::uint64_t v = 0; std::memcpy(&v, row + r * bs + off, n); acc &= v;
+          }
+          while (acc)
+          {
+            const std::size_t s = off * 8 + static_cast<std::size_t>(__builtin_ctzll(acc));
+            if (s < N) ++counts[s];
+            acc &= acc - 1;
+          }
+        }
+      }
+    };
+    const std::size_t T = std::min(count_threads(), words ? words : 1);
+    if (T <= 1) work(0, words);
+    else
+    {
+      std::vector<std::thread> th;
+      for (std::size_t k = 0; k < T; ++k) th.emplace_back(work, words * k / T, words * (k + 1) / T);
+      for (auto& x : th) x.join();
+    }
+    for (std::size_t i = 0; i < N; ++i)
+      m_ratios[i] = m_counts[i] / static_cast<double>(m_nbk);
+    m_qr->free();
+  }
+
   void query_result::compute_ratios()
   {
+    if (fast_count()) { compute_ratios_fast(); return; }
     const uint8_t* data = m_qr->get(0);
 
     std::vector<uint8_t> kres(m_qr->block_size(), 255);

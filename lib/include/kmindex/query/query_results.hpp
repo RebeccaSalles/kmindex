@@ -19,6 +19,7 @@ namespace kmq {
     public:
 
       void compute_ratios();
+      void compute_ratios_fast();  // 64 samples per word, only the set bits, optional threads
 
       void compute_abs();
 
