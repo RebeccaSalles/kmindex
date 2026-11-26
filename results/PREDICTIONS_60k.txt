@@ -1,0 +1,4 @@
+PREDICTIONS for the 60k / 90k campaign with the PR code (written 2026-11-25 before submitting), cold medians, 1000 bp:
+same as opt_all / opt_st within noise, because counting is tiny at 60k (about 0.07 s of a query): median speedup of
+in16fcT8 over today x13 (60k) and x12 (90k) +- 1; 249 groups ~5.7 s, 20 groups ~0.85 s, 2 groups ~0.15 s; st32 vs
+in16fcT8 within +-5% median; outputs identical in every mode (2,880 checks per sample).

@@ -1,0 +1,4 @@
+host=genogpu2 job=17746813 2026-11-25T14:14:12+01:00 fstype=ext4
+NAME ROTA   SIZE MODEL
+sda     1 223,5G DELLBOSS VD
+sdb     1   1,6T PERC H740P Adp
