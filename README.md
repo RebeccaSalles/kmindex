@@ -71,14 +71,14 @@ It needs about 3.3 GB of RAM for the rows. Results on genogpu2 are in `results/c
 
 ## 3. Timing campaigns (Genouest, genogpu2, local SSD)
 
-These are SLURM scripts for our cluster. The paths are ours, but the protocol is in the scripts.
+What we ran is below, with our job scripts (`scripts/pr071_*.sbatch`: our account and paths, kept as the record). To rerun the same protocol with your own account, on Genouest or any Linux machine, use the two portable scripts of §4.
 
 - **The node and its disk:** genogpu2, an exclusive node. The index sits on its local SSD: a Dell BOSS card, two M.2 SATA SSDs mirrored. `lsblk` shows ROTA=1 because the card is a RAID controller.
 - **Cold queries:** before each one, only the index's own files are evicted (`posix_fadvise` DONTNEED on each file). No disk-wide or node-wide setting is touched. Residency is checked with `fincore`; a run counts as cold only below 16 MiB resident.
 - **Order of the modes:** the modes rotate from query to query, so no mode always runs first.
 - **Predictions first:** the expected values were written down before each job was submitted (`results/PREDICTIONS_*.txt`).
 
-**Full width** (`scripts/pr071_steps.sbatch`, job 17746813). It runs on a synthetic one-group index (`scripts/gen_index.py`) with real kmindex files:
+**Full width** (`scripts/pr071_steps.sbatch`, job 17746813; portable version: §4). It runs on a synthetic one-group index (`scripts/gen_index.py`) with real kmindex files:
 - 256 partitions, 128 rows each, every row 3.4 MB (26.9 M samples);
 - an index.json with 26.9 M names;
 - 31% of the bits set;
@@ -103,10 +103,58 @@ A note on the binary:
 - **Why that is fine for the PR modes:** that patch is not in the PRs, and it does nothing unless its switch is set.
 - **Where the PR-only build is checked:** the identity test above runs it.
 
-**Real indexes** (`scripts/pr071_60k.sbatch`, job 17746814). These are 16 designs built with kmhelpers on a 60k-sample and a 90k-sample subset of Logan. The queries are 5 per length, cold.
+**Real indexes** (`scripts/pr071_60k.sbatch`, job 17746814; portable version: §4). These are 16 designs built with kmhelpers on a 60k-sample and a 90k-sample subset of Logan. The queries are 5 per length, cold.
 - **The modes:** today; PR 1; PR 1+2; PR 1+2+3.
 - **Speedup at 1000 bp (PR 1+2 over today):** median ×13.4 on the 60k sample and ×12.1 on the 90k sample; over all designs, from ×4.0 to ×15.6.
 - **Outputs:** `scripts/compare_modes.py` compared every mode against today, as parsed JSON: 1,440 comparisons, 1,440 identical.
+
+## 4. Rerun the timings yourself
+
+Two portable scripts take your own folders and builds; every setting is an environment variable.
+
+- `scripts/fullwidth_timing.sh`: generates the full-width index on local disk, then times every mode (§3, full width).
+- `scripts/realindex_timing.sh <index dir> ...`: copies already-built indexes to local disk, rewrites the absolute paths kmindex stores in them, then times every mode (§3, real indexes).
+
+Both rotate the modes from query to query, evict only the index's own pages before each query, record the residency (`fincore`) and the output md5, and print the medians and whether the outputs are identical across modes.
+
+**Requirements**
+
+| | full width | real indexes |
+|---|---|---|
+| local disk (not NFS, not tmpfs) | PARTS × ROWS × 3.36 MB: **110 GB** by default (see below) | the size of each design (60k: 7 to 21 GB; 90k: 10 to 32 GB) |
+| memory | 32 GB is enough (one query peaks at 6.3 GB; the generator holds the 26.9 M names) | 32 GB |
+| time on genogpu2 | about 45 min (index 5 min, then 5 modes × 15 cold queries) | about 3 h for the 32 designs of §3 |
+| software | Linux, bash, python3 with numpy, GNU time (`/usr/bin/time`); `fincore` (util-linux) to verify the queries are cold, optional | the same |
+| data | none: generated; its 49-byte file header and repartition format come from `tests/data` of v0.7.1 (`SRC`) | read access to the indexes (on Genouest, ours are readable by the group `prj_logan_compression`) |
+
+**Less disk:** `ROWS` (a multiple of 64) and `PARTS` set the index size. `ROWS=64` halves it (55 GB); `ROWS=64 PARTS=128` takes 27.5 GB. Rows stay 3.36 MB wide, so each row still costs what it costs at full width. With fewer rows in all, a query hits the same row more often, which then comes from memory, so the times are a little lower. Keep the defaults to compare with our numbers.
+
+**Settings shared by both scripts** (`scripts/common.sh`):
+
+| variable | meaning | default |
+|---|---|---|
+| `KM_REF` | kmindex built from v0.7.1 (§1) | required |
+| `KM_PR` | kmindex built from `pr4-one-copy-of-names` (§1) | required |
+| `OUT` | results folder you can write | required |
+| `LOCAL` | node-local scratch for the index | `$TMPDIR` or `/tmp` |
+| `MODES` | `ref` = v0.7.1; `prN` = PR build with the switches of PRs 1..N | `ref pr1 pr12 pr123 pr1234` |
+| `LENGTHS`, `QUERIES` | query lengths, and the folder of `queries/<length>/*.fa` | `250 500 1000`, `queries/` (5 real sequences per length, from Logan unitigs) |
+| `THREADS`, `Z`, `R` | `kmindex query -t -z -r` | `4`, `6`, `0.99` |
+| `SRC`, `SAMPLES`, `PARTS`, `ROWS`, `PROCS` | full width only: v0.7.1 checkout, index size, generator processes | required, 26857911, 256, 128, 8 |
+
+**On Genouest** (on a compute node: the login node does not run builds). Build the two binaries as in §1 inside an `srun` session, then, for example:
+
+```
+export KM_REF=$PWD/build_ref/app/kmindex/kmindex KM_PR=$PWD/build_new/app/kmindex/kmindex SRC=$PWD/ref
+export OUT=/projects/<your project>/<you>/kmindex_evidence   # or any folder you can write
+sbatch -p <partition> --nodelist=<node> --exclusive --cpus-per-task=16 --mem=32G --time=03:00:00 --export=ALL \
+       scripts/fullwidth_timing.sh
+B=/projects/logan_compression/rsalles/span_tuning_paper
+sbatch -p <partition> --nodelist=<node> --exclusive --cpus-per-task=16 --mem=32G --time=06:00:00 --export=ALL \
+       scripts/realindex_timing.sh $B/training_rerun_builds/b1p1_g02 $B/training_rerun_builds/b1p05_g249
+```
+
+We used `-p gpu --nodelist=genogpu2 --exclusive` (its local disk is the SSD of §3). Both scripts were checked on a laptop on 27 Nov at small size (`SAMPLES=100000 PARTS=8 ROWS=64`): outputs identical across the five modes, the 101 planted samples found by v0.7.1 and by the PRs.
 
 ## What this does not show
 
